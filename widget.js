@@ -2,10 +2,11 @@
   "use strict";
 
   // ===========================================================================
-  // SISGPI Book Builder v2.1.1 - SAC Custom Widget com Data Binding
+  // SISGPI Book Builder v2.2.0 - SAC Custom Widget com Data Binding
   // ===========================================================================
-  // Inspeção profunda: dumpa metadata e data[0] como JSON completo pra
-  // descobrir como measures_N mapeiam pros indicadores (account-based model).
+  // Mapeamento de measures_N -> nome do indicador via:
+  //   metadata.mainStructureMembers["measures_N"].label
+  // Cada linha do data é 1 projeto + N medidas (N = qtde de Contas no Builder).
   // ===========================================================================
 
   const PDFLIB_CDN = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
@@ -112,7 +113,7 @@
 
     inspectDataBinding() {
       this._clearLog();
-      this._log("=== INSPEÇÃO v2.1.1 (JSON profundo) ===");
+      this._log("=== INSPEÇÃO v2.2.0 ===");
       this._log("");
 
       const db = this._dataBinding;
@@ -305,7 +306,7 @@
       this._btnInspect.disabled = true;
 
       try {
-        this._log("Recebidos " + data.length + " cells.");
+        this._log("Recebidos " + data.length + " linhas.");
 
         const projDimIdx = this._findProjectDimIndex(db);
         if (projDimIdx < 0) {
@@ -314,14 +315,21 @@
         }
         this._log("Dimensão Projeto = dimensions_" + projDimIdx);
 
-        const accDimIdx = this._findAccountDimIndex(db);
-        if (accDimIdx >= 0) {
-          this._log("Dimensão Account = dimensions_" + accDimIdx);
-        } else {
-          this._log("Aviso: dimensão Account não identificada");
+        // Mapa de measures_N -> { id, label } via metadata.mainStructureMembers
+        const memberMap = this._buildMemberMap(db.metadata);
+        const memberKeys = Object.keys(memberMap);
+        this._log("Indicadores configurados (" + memberKeys.length + "):");
+        for (let i = 0; i < memberKeys.length; i++) {
+          const k = memberKeys[i];
+          this._log("  " + k + " -> " + memberMap[k].label);
+        }
+        if (memberKeys.length === 0) {
+          this._log("ERRO: Nenhum indicador encontrado em metadata.mainStructureMembers.");
+          this._log("Verifica se as Contas estão configuradas no Builder Panel.");
+          return;
         }
 
-        const projects = this._groupByProject(data, projDimIdx, accDimIdx);
+        const projects = this._groupByProject(data, projDimIdx, memberMap);
         this._log("Projetos únicos: " + projects.length);
 
         const prefix = this._props.projectFilterPrefix;
@@ -373,9 +381,59 @@
     // METADATA HELPERS
     // =======================================================================
 
+    _buildMemberMap(metadata) {
+      // metadata.mainStructureMembers é um objeto: { measures_0: { id, label }, ... }
+      const map = {};
+      if (!metadata) return map;
+      const msm = metadata.mainStructureMembers;
+      if (!msm) return map;
+      try {
+        if (Array.isArray(msm)) {
+          for (let i = 0; i < msm.length; i++) {
+            const m = msm[i];
+            const key = "measures_" + i;
+            map[key] = {
+              id: (m && m.id) || "",
+              label: (m && (m.label || m.description)) || key
+            };
+          }
+        } else if (typeof msm === "object") {
+          const keys = Object.keys(msm);
+          for (let i = 0; i < keys.length; i++) {
+            const k = keys[i];
+            const m = msm[k];
+            map[k] = {
+              id: (m && m.id) || "",
+              label: (m && (m.label || m.description)) || k
+            };
+          }
+        }
+      } catch (e) {}
+      return map;
+    }
+
     _findProjectDimIndex(db) {
       try {
         const md = db.metadata;
+        // metadata.dimensions pode ser objeto (keyed por dimensions_N) ou array
+        if (md && md.dimensions) {
+          const dims = md.dimensions;
+          if (Array.isArray(dims)) {
+            for (let i = 0; i < dims.length; i++) {
+              if (dims[i] && dims[i].id === "S00_PROJECT") return i;
+            }
+          } else if (typeof dims === "object") {
+            const keys = Object.keys(dims);
+            for (let i = 0; i < keys.length; i++) {
+              const k = keys[i]; // ex: "dimensions_0"
+              const d = dims[k];
+              if (d && d.id === "S00_PROJECT") {
+                const idx = parseInt(k.substring("dimensions_".length), 10);
+                if (!isNaN(idx)) return idx;
+              }
+            }
+          }
+        }
         if (md && md.feeds) {
           for (let i = 0; i < md.feeds.length; i++) {
             const f = md.feeds[i];
@@ -384,11 +442,6 @@
                 if (f.values[j].id === "S00_PROJECT") return j;
               }
             }
-          }
-        }
-        if (md && md.dimensions) {
-          for (let i = 0; i < md.dimensions.length; i++) {
-            if (md.dimensions[i].id === "S00_PROJECT") return i;
           }
         }
       } catch (e) {}
@@ -416,27 +469,10 @@
       return -1;
     }
 
-    _findAccountDimIndex(db) {
-      try {
-        const md = db.metadata;
-        if (md && md.feeds) {
-          for (let i = 0; i < md.feeds.length; i++) {
-            const f = md.feeds[i];
-            if (f.id === "dimensions" && f.values) {
-              for (let j = 0; j < f.values.length; j++) {
-                if (f.values[j].id === "S00_ACCOUNT") return j;
-              }
-            }
-          }
-        }
-      } catch (e) {}
-      return -1;
-    }
-
-    _groupByProject(data, projDimIdx, accDimIdx) {
+    // Cada linha = 1 projeto. Cada measures_N = 1 indicador (mapeado via memberMap).
+    _groupByProject(data, projDimIdx, memberMap) {
       const map = new Map();
       const projKey = "dimensions_" + projDimIdx;
-      const accKey = accDimIdx >= 0 ? "dimensions_" + accDimIdx : null;
 
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
@@ -449,26 +485,27 @@
           map.set(projId, { id: projId, description: projDesc, indicators: [] });
         }
 
-        let accountDesc = "";
-        let accountId = "";
-        if (accKey && row[accKey]) {
-          accountId = row[accKey].id || "";
-          accountDesc = row[accKey].label || row[accKey].description || "";
+        const project = map.get(projId);
+        const rowKeys = Object.keys(row);
+        for (let j = 0; j < rowKeys.length; j++) {
+          const k = rowKeys[j];
+          if (k.indexOf("measures_") !== 0) continue;
+          const measure = row[k];
+          if (!measure) continue;
+          const member = memberMap[k] || { id: "", label: k };
+          const rawValue = measure.raw !== undefined
+            ? measure.raw
+            : (measure.rawValue !== undefined ? measure.rawValue : null);
+          const formattedValue = measure.formatted !== undefined
+            ? measure.formatted
+            : (measure.formattedValue !== undefined ? measure.formattedValue : "");
+          project.indicators.push({
+            accountId: member.id,
+            accountDesc: member.label,
+            rawValue: rawValue,
+            formattedValue: formattedValue
+          });
         }
-
-        let rawValue = null;
-        let formattedValue = "";
-        if (row.measures_0) {
-          rawValue = row.measures_0.raw !== undefined ? row.measures_0.raw : (row.measures_0.rawValue !== undefined ? row.measures_0.rawValue : null);
-          formattedValue = row.measures_0.formatted !== undefined ? row.measures_0.formatted : (row.measures_0.formattedValue !== undefined ? row.measures_0.formattedValue : "");
-        }
-
-        map.get(projId).indicators.push({
-          accountId: accountId,
-          accountDesc: accountDesc,
-          rawValue: rawValue,
-          formattedValue: formattedValue
-        });
       }
 
       return Array.from(map.values());
