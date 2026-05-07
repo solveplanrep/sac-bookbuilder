@@ -12,7 +12,7 @@
     {
       "kind": "main",
       "tag": "com-solveplan-sisgpi-bookbuilder",
-      "url": "REPLACE_WITH_YOUR_HOST/widget.js",
+      "url": "https://solveplan.github.io/sac-bookbuilder/widget.js",
       "integrity": "",
       "ignoreIntegrity": true
     }
