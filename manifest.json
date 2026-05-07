@@ -1,11 +1,11 @@
 {
   "name": "SISGPI Book Builder",
-  "description": "Gera book em PDF com uma página por projeto a partir do modelo S00_CAPEX",
+  "description": "Gera book em PDF (1 página por projeto AMZ) a partir de Data Binding ao S00_CAPEX",
   "newInstancePrefix": "BookBuilder",
   "vendor": "Solveplan",
   "license": "internal-use",
   "id": "com.solveplan.sisgpi.bookbuilder",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "icon": "",
   "eula": "",
   "webcomponents": [
@@ -20,68 +20,57 @@
   "properties": {
     "headerTitle": {
       "type": "string",
-      "description": "Título exibido na capa do book",
+      "description": "Título da capa do book",
       "default": "Card SISGPI - Portfólio de Projetos"
     },
     "subtitleTemplate": {
       "type": "string",
-      "description": "Subtítulo da capa (use {count} para o número de projetos)",
+      "description": "Subtítulo (use {count} para o número de projetos)",
       "default": "{count} projetos analisados"
     },
-    "buttonLabel": {
+    "projectFilterPrefix": {
       "type": "string",
-      "description": "Texto do botão de gerar PDF",
-      "default": "Gerar Book PDF"
-    },
-    "logoUrl": {
-      "type": "string",
-      "description": "URL de uma imagem PNG/JPG para a capa (opcional)",
-      "default": ""
+      "description": "Prefixo dos projetos a incluir (ex: AMZ.)",
+      "default": "AMZ."
     },
     "userEmail": {
       "type": "string",
-      "description": "Email do usuário gerando o book (mostrado no rodapé)",
+      "description": "Email do usuário (rodapé)",
       "default": ""
     }
   },
   "methods": {
-    "addPage": {
-      "description": "Adiciona uma página ao book com dados de um projeto",
-      "parameters": [
-        { "name": "projectCode", "type": "string", "description": "Código do projeto (ex: AMZ.042)" },
-        { "name": "projectName", "type": "string", "description": "Nome do projeto (ex: Microbacias)" },
-        { "name": "kpisJson", "type": "string", "description": "JSON com os 4 KPIs do topo" },
-        { "name": "indicatorsJson", "type": "string", "description": "JSON array com os indicadores da tabela" }
-      ],
+    "inspectDataBinding": {
+      "description": "Mostra a estrutura do Data Binding na UI do widget (debug)",
+      "parameters": [],
       "returnType": "void"
     },
-    "generateAndDownload": {
-      "description": "Gera o PDF a partir do buffer e dispara o download",
+    "generateBook": {
+      "description": "Gera o book PDF a partir dos dados do Data Binding",
       "parameters": [
         { "name": "versionLabel", "type": "string", "description": "Label da versão (ex: RF3T25_Oficial)" }
       ],
       "returnType": "void"
-    },
-    "resetBook": {
-      "description": "Limpa o buffer de páginas",
-      "parameters": [],
-      "returnType": "void"
-    },
-    "getPageCount": {
-      "description": "Retorna o número de páginas no buffer",
-      "parameters": [],
-      "returnType": "integer"
     }
   },
   "events": {
-    "onPageAdded": {
-      "description": "Disparado a cada chamada de addPage com sucesso"
-    },
-    "onBookGenerated": {
-      "description": "Disparado quando o PDF foi gerado e o download foi iniciado"
-    },
-    "onError": {
-      "description": "Disparado em caso de erro de geração ou parse"
+    "onBookGenerated": { "description": "Disparado quando o PDF foi gerado" },
+    "onError": { "description": "Disparado em caso de erro" }
+  },
+  "dataBindings": {
+    "myDataBinding": {
+      "feeds": [
+        {
+          "id": "dimensions",
+          "description": "Dimensões (S00_PROJECT + S00_ACCOUNT)",
+          "type": "dimension"
+        },
+        {
+          "id": "measures",
+          "description": "Medidas (Montante)",
+          "type": "mainStructureMember"
+        }
+      ]
     }
   }
 }
