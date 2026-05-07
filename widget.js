@@ -2,10 +2,11 @@
   "use strict";
 
   // ===========================================================================
-  // SISGPI Book Builder v2.0 - SAC Custom Widget com Data Binding nativa
+  // SISGPI Book Builder v2.1.0 - SAC Custom Widget com Data Binding
   // ===========================================================================
-  // Recebe dados do modelo S00_CAPEX via Data Binding configurada no Builder
-  // do SAC. Agrupa por projeto, filtra os AMZ.xxx e gera PDF multi-página.
+  // Padrão de Data Binding alinhado com exemplos oficiais SAP-samples
+  // (Pie Chart, Gantt, Sunburst): a binding chega via changedProperties no
+  // callback onCustomWidgetAfterUpdate, NÃO via this.dataBindings.
   // ===========================================================================
 
   const PDFLIB_CDN = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
@@ -24,7 +25,6 @@
     return _pdfLibPromise;
   }
 
-  // ---- Ordem canônica dos indicadores na tabela (de cima pra baixo) -------
   const INDICATOR_ORDER = [
     { label: "Indicadores Auxiliares SISGPI", isGroup: true,  format: "currency" },
     { label: "Investimento",                  isGroup: false, format: "currency" },
@@ -45,51 +45,23 @@
   const template = document.createElement("template");
   template.innerHTML = `
     <style>
-      :host {
-        display: block;
-        padding: 12px;
-        font-family: "72", "Segoe UI", Arial, sans-serif;
-        font-size: 13px;
-        color: #32363a;
-      }
+      :host { display: block; padding: 12px; font-family: "72", "Segoe UI", Arial, sans-serif; font-size: 13px; color: #32363a; }
       .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-      button {
-        padding: 8px 14px;
-        border: 1px solid #0a6ed1;
-        background: #0a6ed1;
-        color: #fff;
-        border-radius: 4px;
-        cursor: pointer;
-        font-family: inherit;
-        font-size: 13px;
-      }
+      button { padding: 8px 14px; border: 1px solid #0a6ed1; background: #0a6ed1; color: #fff; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 13px; }
       button:hover:not(:disabled) { background: #085caf; }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
       button.secondary { background: #fff; color: #0a6ed1; }
       button.secondary:hover:not(:disabled) { background: #f0f7fc; }
       .progress-bar { margin-top: 8px; height: 6px; background: #eaecee; border-radius: 3px; overflow: hidden; }
       .progress-fill { height: 100%; background: linear-gradient(90deg, #0a6ed1, #0596fa); transition: width 0.15s ease; width: 0; }
-      .status {
-        margin-top: 10px;
-        font-size: 11px;
-        font-family: Consolas, Monaco, monospace;
-        color: #444;
-        line-height: 1.4;
-        white-space: pre-wrap;
-        max-height: 240px;
-        overflow: auto;
-        padding: 8px;
-        background: #f8f9fa;
-        border: 1px solid #eaecee;
-        border-radius: 4px;
-      }
+      .status { margin-top: 10px; font-size: 11px; font-family: Consolas, Monaco, monospace; color: #444; line-height: 1.4; white-space: pre-wrap; max-height: 280px; overflow: auto; padding: 8px; background: #f8f9fa; border: 1px solid #eaecee; border-radius: 4px; }
     </style>
     <div class="controls">
       <button id="btnInspect" class="secondary">Inspecionar Data Binding</button>
       <button id="btnGenerate">Gerar Book PDF</button>
     </div>
     <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
-    <div class="status" id="status">Aguardando configuração de Data Binding no painel Builder...</div>
+    <div class="status" id="status">Aguardando Data Binding...</div>
   `;
 
   class SISGPIBookBuilder extends HTMLElement {
@@ -98,6 +70,7 @@
       this._shadowRoot = this.attachShadow({ mode: "open" });
       this._shadowRoot.appendChild(template.content.cloneNode(true));
 
+      this._dataBinding = null;
       this._props = {
         headerTitle: "Card SISGPI - Portfólio de Projetos",
         subtitleTemplate: "{count} projetos analisados",
@@ -114,16 +87,21 @@
       this._btnGenerate.addEventListener("click", () => this.generateBook(""));
     }
 
-    // ---- SDK lifecycle ----
     onCustomWidgetBeforeUpdate(_changed) { /* no-op */ }
 
-    onCustomWidgetAfterUpdate(changed) {
-      if (changed.headerTitle !== undefined) this._props.headerTitle = changed.headerTitle;
-      if (changed.subtitleTemplate !== undefined) this._props.subtitleTemplate = changed.subtitleTemplate;
-      if (changed.projectFilterPrefix !== undefined) this._props.projectFilterPrefix = changed.projectFilterPrefix;
-      if (changed.userEmail !== undefined) this._props.userEmail = changed.userEmail;
-      if ("myDataBinding" in changed) {
-        this._log("[SDK] Data binding atualizado (state pode ter mudado).");
+    onCustomWidgetAfterUpdate(changedProperties) {
+      if (changedProperties.headerTitle !== undefined) this._props.headerTitle = changedProperties.headerTitle;
+      if (changedProperties.subtitleTemplate !== undefined) this._props.subtitleTemplate = changedProperties.subtitleTemplate;
+      if (changedProperties.projectFilterPrefix !== undefined) this._props.projectFilterPrefix = changedProperties.projectFilterPrefix;
+      if (changedProperties.userEmail !== undefined) this._props.userEmail = changedProperties.userEmail;
+
+      // PADRÃO CANÔNICO: captura a binding via changedProperties
+      if ("myDataBinding" in changedProperties) {
+        const db = changedProperties.myDataBinding;
+        this._dataBinding = db;
+        const state = db && db.state ? db.state : "(?)";
+        const len = db && db.data && Array.isArray(db.data) ? db.data.length : "?";
+        this._log("[SDK] DataBinding state=" + state + ", data.length=" + len);
       }
     }
 
@@ -135,75 +113,127 @@
 
     inspectDataBinding() {
       this._clearLog();
-      this._log("=== INSPEÇÃO DO DATA BINDING ===");
+      this._log("=== INSPEÇÃO v2.1.0 ===");
+      this._log("");
 
-      const binding = this._getBinding();
-      if (!binding) {
-        this._log("ERRO: Data Binding 'myDataBinding' não está disponível.");
-        this._log("Configure no painel Builder do widget:");
-        this._log("  - Dimensões: arraste S00_PROJECT e S00_ACCOUNT");
-        this._log("  - Medidas: arraste Montante");
-        this._log("  - Filtros: VERSION = RF3T25_Oficial");
-        this._listAvailableProperties();
+      const db = this._dataBinding;
+      if (!db) {
+        this._log("ERRO: Data binding ainda não chegou.");
+        this._log("Possíveis causas:");
+        this._log("  1. Data Binding não configurado no painel Builder");
+        this._log("  2. Story em modo Edit (a binding às vezes só popula em modo View)");
+        this._log("  3. Modelo sem dados pra essa combinação de filtros");
         return;
       }
 
-      this._log("Binding encontrado.");
-      const state = binding.state || binding.metadata && binding.metadata.state;
-      this._log("State: " + (state !== undefined ? String(state) : "(não detectado)"));
-
-      const data = this._extractData(binding);
-      if (!data) {
-        this._log("data: não encontrado em nenhum dos caminhos conhecidos.");
-        this._log("Keys disponíveis no binding:");
-        try {
-          const keys = Object.keys(binding);
-          for (let i = 0; i < keys.length; i++) {
-            this._log("  - " + keys[i]);
-          }
-        } catch (e) {
-          this._log("(impossível listar keys: " + e.message + ")");
-        }
-        return;
-      }
-
-      this._log("Total de cells: " + data.length);
-      if (data.length === 0) return;
+      this._log("[1] Estado:");
+      this._log("  state: " + (db.state !== undefined ? String(db.state) : "(não definido)"));
+      const data = (db.data && Array.isArray(db.data)) ? db.data : null;
+      this._log("  data.length: " + (data ? String(data.length) : "(sem data)"));
 
       this._log("");
-      this._log("Estrutura do primeiro cell:");
-      const first = data[0];
-      try {
-        const keys = Object.keys(first);
-        for (let i = 0; i < keys.length; i++) {
-          const k = keys[i];
-          const v = first[k];
-          if (v && typeof v === "object") {
-            const id = v.id !== undefined ? v.id : "?";
-            const desc = v.description !== undefined ? v.description : (v.label !== undefined ? v.label : "?");
-            const raw = v.rawValue !== undefined ? v.rawValue : "";
-            const fmt = v.formattedValue !== undefined ? v.formattedValue : "";
-            this._log("  " + k + ": id='" + id + "' desc='" + desc + "' raw=" + raw + " fmt='" + fmt + "'");
-          } else {
-            this._log("  " + k + ": " + String(v));
+      this._log("[2] Metadata:");
+      const md = db.metadata;
+      if (!md) {
+        this._log("  (sem metadata)");
+      } else {
+        try {
+          const mdKeys = Object.keys(md);
+          this._log("  keys: " + mdKeys.join(", "));
+          if (md.feeds) {
+            this._log("  feeds:");
+            for (let i = 0; i < md.feeds.length; i++) {
+              const f = md.feeds[i];
+              this._log("    [" + i + "] id='" + f.id + "' values=" + (f.values ? f.values.length : "?"));
+              if (f.values) {
+                for (let j = 0; j < f.values.length; j++) {
+                  const v = f.values[j];
+                  this._log("      - " + (v.id || "?") + " | " + (v.description || v.label || "?"));
+                }
+              }
+            }
+          }
+          if (md.dimensions) {
+            this._log("  metadata.dimensions: " + md.dimensions.length + " items");
+            for (let i = 0; i < md.dimensions.length; i++) {
+              this._log("    [" + i + "] " + (md.dimensions[i].id || "?"));
+            }
+          }
+          if (md.mainStructureMembers) {
+            this._log("  metadata.mainStructureMembers: " + md.mainStructureMembers.length + " items");
+            for (let i = 0; i < md.mainStructureMembers.length; i++) {
+              this._log("    [" + i + "] " + (md.mainStructureMembers[i].id || "?"));
+            }
+          }
+        } catch (e) {
+          this._log("  (erro ao introspectar metadata: " + e.message + ")");
+        }
+      }
+
+      if (data && data.length > 0) {
+        this._log("");
+        this._log("[3] Primeira row (data[0]):");
+        const row = data[0];
+        try {
+          const rowKeys = Object.keys(row);
+          this._log("  keys: " + rowKeys.join(", "));
+          for (let i = 0; i < rowKeys.length; i++) {
+            const k = rowKeys[i];
+            const v = row[k];
+            if (v === null || v === undefined) {
+              this._log("  " + k + ": null/undefined");
+            } else if (typeof v !== "object") {
+              this._log("  " + k + ": " + String(v));
+            } else {
+              const id = v.id !== undefined ? String(v.id) : "?";
+              const lbl = v.label !== undefined ? String(v.label) : (v.description !== undefined ? String(v.description) : "?");
+              const raw = v.raw !== undefined ? String(v.raw) : (v.rawValue !== undefined ? String(v.rawValue) : "-");
+              const fmt = v.formatted !== undefined ? String(v.formatted) : (v.formattedValue !== undefined ? String(v.formattedValue) : "");
+              this._log("  " + k + ": id='" + id + "' label='" + lbl + "' raw=" + raw + " fmt='" + fmt + "'");
+            }
+          }
+        } catch (e) {
+          this._log("  (erro: " + e.message + ")");
+        }
+
+        if (data.length > 1) {
+          this._log("");
+          this._log("[4] Amostra de IDs em data[0..2]:");
+          for (let i = 0; i < data.length && i < 3; i++) {
+            const r = data[i];
+            const parts = [];
+            try {
+              const ks = Object.keys(r);
+              for (let j = 0; j < ks.length; j++) {
+                const k = ks[j];
+                const v = r[k];
+                if (v && typeof v === "object" && (v.id !== undefined || v.label !== undefined)) {
+                  parts.push(k + "=" + (v.id || v.label));
+                } else if (v && typeof v === "object" && (v.raw !== undefined || v.rawValue !== undefined)) {
+                  parts.push(k + "=" + (v.raw !== undefined ? v.raw : v.rawValue));
+                }
+              }
+            } catch (e) {}
+            this._log("  [" + i + "] " + parts.join(", "));
           }
         }
-      } catch (e) {
-        this._log("(erro ao iterar keys: " + e.message + ")");
       }
     }
 
     async generateBook(versionLabel) {
       this._clearLog();
-      const binding = this._getBinding();
-      if (!binding) {
-        this._log("ERRO: Configure o Data Binding no painel Builder primeiro.");
+      const db = this._dataBinding;
+      if (!db) {
+        this._log("ERRO: Data Binding ainda não chegou. Configure no Builder.");
         return;
       }
-
-      const data = this._extractData(binding);
-      if (!data || data.length === 0) {
-        this._log("ERRO: Sem dados disponíveis no binding.");
+      if (db.state && db.state !== "success") {
+        this._log("ERRO: state='" + db.state + "' (esperado 'success')");
+        return;
+      }
+      const data = db.data;
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        this._log("ERRO: Sem dados (data vazio ou ausente)");
         return;
       }
 
@@ -211,17 +241,31 @@
       this._btnInspect.disabled = true;
 
       try {
-        this._log("Recebidas " + data.length + " cells do data binding.");
-        const projects = this._groupByProject(data);
+        this._log("Recebidos " + data.length + " cells.");
+
+        const projDimIdx = this._findProjectDimIndex(db);
+        if (projDimIdx < 0) {
+          this._log("ERRO: Não foi possível identificar a dimensão Projeto.");
+          return;
+        }
+        this._log("Dimensão Projeto = dimensions_" + projDimIdx);
+
+        const accDimIdx = this._findAccountDimIndex(db);
+        if (accDimIdx >= 0) {
+          this._log("Dimensão Account = dimensions_" + accDimIdx);
+        } else {
+          this._log("Aviso: dimensão Account não identificada");
+        }
+
+        const projects = this._groupByProject(data, projDimIdx, accDimIdx);
         this._log("Projetos únicos: " + projects.length);
 
         const prefix = this._props.projectFilterPrefix;
-        const amz = projects.filter((p) => p.id && p.id.indexOf(prefix) === 0);
+        const amz = projects.filter(p => p.id && p.id.indexOf(prefix) === 0);
         this._log("Projetos com prefixo '" + prefix + "': " + amz.length);
 
         if (amz.length === 0) {
           this._log("ERRO: Nenhum projeto bate com '" + prefix + "'.");
-          this._log("Primeiros 5 IDs encontrados (pra debug):");
           for (let i = 0; i < projects.length && i < 5; i++) {
             this._log("  - '" + projects[i].id + "'");
           }
@@ -237,26 +281,23 @@
         const fontReg = await doc.embedFont(StandardFonts.Helvetica);
         const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-        this._log("Renderizando capa...");
         this._drawCoverPage(doc, fontReg, fontBold, rgb, amz, versionLabel);
-
         for (let i = 0; i < amz.length; i++) {
           this._drawProjectPage(doc, fontReg, fontBold, rgb, amz[i], i + 1, amz.length, versionLabel);
           this._setProgress(((i + 1) / amz.length) * 100);
           if (i % 20 === 0) {
             this._log("Renderizando " + (i + 1) + "/" + amz.length + ": " + amz[i].id);
-            await new Promise((r) => setTimeout(r, 0));
+            await new Promise(r => setTimeout(r, 0));
           }
         }
 
         const bytes = await doc.save();
         const filename = "SISGPI_Book_" + this._timestamp() + ".pdf";
         this._downloadBlob(bytes, filename);
-        this._log("PRONTO! " + amz.length + " páginas geradas.");
-        this._log("Download: " + filename);
+        this._log("PRONTO! " + amz.length + " páginas em " + filename);
         this.dispatchEvent(new Event("onBookGenerated"));
       } catch (e) {
-        this._log("ERRO durante geração: " + e.message);
+        this._log("ERRO: " + e.message);
         this.dispatchEvent(new Event("onError"));
       } finally {
         this._btnGenerate.disabled = false;
@@ -265,98 +306,104 @@
     }
 
     // =======================================================================
-    // DATA BINDING ACCESS - tenta múltiplos caminhos pra robustez
+    // METADATA HELPERS
     // =======================================================================
 
-    _getBinding() {
+    _findProjectDimIndex(db) {
       try {
-        if (this.dataBindings && typeof this.dataBindings.getDataBinding === "function") {
-          return this.dataBindings.getDataBinding("myDataBinding");
+        const md = db.metadata;
+        if (md && md.feeds) {
+          for (let i = 0; i < md.feeds.length; i++) {
+            const f = md.feeds[i];
+            if (f.id === "dimensions" && f.values) {
+              for (let j = 0; j < f.values.length; j++) {
+                if (f.values[j].id === "S00_PROJECT") return j;
+              }
+            }
+          }
         }
-        if (this.dataBindings && this.dataBindings.myDataBinding) {
-          return this.dataBindings.myDataBinding;
+        if (md && md.dimensions) {
+          for (let i = 0; i < md.dimensions.length; i++) {
+            if (md.dimensions[i].id === "S00_PROJECT") return i;
+          }
         }
-        if (this.myDataBinding) {
-          return this.myDataBinding;
-        }
-      } catch (e) {
-        this._log("(erro ao acessar binding: " + e.message + ")");
-      }
-      return null;
+      } catch (e) {}
+      return this._inferProjectDimIndex(db.data);
     }
 
-    _extractData(binding) {
-      if (Array.isArray(binding)) return binding;
-      if (binding.data && Array.isArray(binding.data)) return binding.data;
-      if (binding.dataBindings && binding.dataBindings.data) return binding.dataBindings.data;
-      return null;
-    }
-
-    _listAvailableProperties() {
-      this._log("");
-      this._log("Propriedades disponíveis em this:");
-      const candidates = ["dataBindings", "myDataBinding", "dataBinding"];
-      for (let i = 0; i < candidates.length; i++) {
-        const k = candidates[i];
-        if (this[k] !== undefined) {
-          this._log("  - this." + k + ": " + (typeof this[k]));
-        } else {
-          this._log("  - this." + k + ": undefined");
+    _inferProjectDimIndex(data) {
+      if (!data || data.length === 0) return -1;
+      try {
+        const row = data[0];
+        const keys = Object.keys(row);
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          if (k.indexOf("dimensions_") !== 0) continue;
+          const v = row[k];
+          if (v && typeof v === "object") {
+            const id = v.id || v.label || "";
+            if (typeof id === "string" && id.indexOf("AMZ") === 0) {
+              const idx = parseInt(k.substring("dimensions_".length), 10);
+              if (!isNaN(idx)) return idx;
+            }
+          }
         }
-      }
+      } catch (e) {}
+      return -1;
     }
 
-    // =======================================================================
-    // GROUPING - tenta vários nomes de chaves possíveis
-    // =======================================================================
-
-    _findKey(obj, candidates) {
-      for (let i = 0; i < candidates.length; i++) {
-        if (obj[candidates[i]] !== undefined) return candidates[i];
-      }
-      return null;
+    _findAccountDimIndex(db) {
+      try {
+        const md = db.metadata;
+        if (md && md.feeds) {
+          for (let i = 0; i < md.feeds.length; i++) {
+            const f = md.feeds[i];
+            if (f.id === "dimensions" && f.values) {
+              for (let j = 0; j < f.values.length; j++) {
+                if (f.values[j].id === "S00_ACCOUNT") return j;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+      return -1;
     }
 
-    _groupByProject(data) {
+    _groupByProject(data, projDimIdx, accDimIdx) {
       const map = new Map();
+      const projKey = "dimensions_" + projDimIdx;
+      const accKey = accDimIdx >= 0 ? "dimensions_" + accDimIdx : null;
 
       for (let i = 0; i < data.length; i++) {
-        const cell = data[i];
-
-        const projKey = this._findKey(cell, ["S00_PROJECT", "[S00_PROJECT]", "S00_PROJECT_ID"]);
-        if (!projKey) continue;
-        const projMember = cell[projKey];
+        const row = data[i];
+        const projMember = row[projKey];
         if (!projMember) continue;
-
-        const projId = (projMember.id !== undefined ? projMember.id : projMember.label) || "";
-        const projDesc = projMember.description || projMember.label || projId;
+        const projId = projMember.id || projMember.label || "";
+        const projDesc = projMember.label || projMember.description || projId;
 
         if (!map.has(projId)) {
           map.set(projId, { id: projId, description: projDesc, indicators: [] });
         }
 
-        // Account
-        const accKey = this._findKey(cell, ["S00_ACCOUNT", "[S00_ACCOUNT]"]);
-        const accMember = accKey ? cell[accKey] : null;
+        let accountDesc = "";
+        let accountId = "";
+        if (accKey && row[accKey]) {
+          accountId = row[accKey].id || "";
+          accountDesc = row[accKey].label || row[accKey].description || "";
+        }
 
-        // Value: tenta encontrar a primeira propriedade com rawValue ou formattedValue
-        let valMember = null;
-        try {
-          const keys = Object.keys(cell);
-          for (let k = 0; k < keys.length; k++) {
-            const v = cell[keys[k]];
-            if (v && typeof v === "object" && (v.rawValue !== undefined || v.formattedValue !== undefined)) {
-              valMember = v;
-              break;
-            }
-          }
-        } catch (e) { /* ignore */ }
+        let rawValue = null;
+        let formattedValue = "";
+        if (row.measures_0) {
+          rawValue = row.measures_0.raw !== undefined ? row.measures_0.raw : (row.measures_0.rawValue !== undefined ? row.measures_0.rawValue : null);
+          formattedValue = row.measures_0.formatted !== undefined ? row.measures_0.formatted : (row.measures_0.formattedValue !== undefined ? row.measures_0.formattedValue : "");
+        }
 
         map.get(projId).indicators.push({
-          accountId: accMember && accMember.id !== undefined ? accMember.id : "",
-          accountDesc: accMember && (accMember.description || accMember.label) ? (accMember.description || accMember.label) : "",
-          rawValue: valMember && valMember.rawValue !== undefined ? valMember.rawValue : null,
-          formattedValue: valMember && valMember.formattedValue ? valMember.formattedValue : ""
+          accountId: accountId,
+          accountDesc: accountDesc,
+          rawValue: rawValue,
+          formattedValue: formattedValue
         });
       }
 
@@ -370,27 +417,15 @@
     _drawCoverPage(doc, fontReg, fontBold, rgb, projects, versionLabel) {
       const page = doc.addPage([842, 595]);
       const { width, height } = page.getSize();
-
       page.drawRectangle({ x: 0, y: 0, width: 8, height: height, color: rgb(0.04, 0.43, 0.82) });
-      page.drawText(this._props.headerTitle, {
-        x: 60, y: height - 140, size: 28, font: fontBold, color: rgb(0.04, 0.43, 0.82)
-      });
-
+      page.drawText(this._props.headerTitle, { x: 60, y: height - 140, size: 28, font: fontBold, color: rgb(0.04, 0.43, 0.82) });
       const subtitle = String(this._props.subtitleTemplate || "").replace("{count}", String(projects.length));
-      page.drawText(subtitle, {
-        x: 60, y: height - 180, size: 16, font: fontReg, color: rgb(0.3, 0.3, 0.3)
-      });
-
+      page.drawText(subtitle, { x: 60, y: height - 180, size: 16, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
       if (versionLabel) {
-        page.drawText("Versão: " + versionLabel, {
-          x: 60, y: height - 210, size: 12, font: fontReg, color: rgb(0.4, 0.4, 0.4)
-        });
+        page.drawText("Versão: " + versionLabel, { x: 60, y: height - 210, size: 12, font: fontReg, color: rgb(0.4, 0.4, 0.4) });
       }
-
       let sumY = height - 270;
-      page.drawText("Projetos incluídos:", {
-        x: 60, y: sumY, size: 12, font: fontBold, color: rgb(0.2, 0.2, 0.2)
-      });
+      page.drawText("Projetos incluídos:", { x: 60, y: sumY, size: 12, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
       sumY -= 22;
       const maxItemsCol = 18;
       const colWidth = 240;
@@ -401,23 +436,14 @@
         const row = i % maxItemsCol;
         const x = 60 + col * colWidth;
         const y = sumY - row * 14;
-        const label = (p.id + " " + p.description).substring(0, 32);
-        page.drawText(label, { x: x, y: y, size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
+        page.drawText((p.id + " " + p.description).substring(0, 32), { x: x, y: y, size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
       }
       if (projects.length > sliced.length) {
-        page.drawText("... e mais " + (projects.length - sliced.length) + " projetos", {
-          x: 60, y: sumY - maxItemsCol * 14 - 10,
-          size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5)
-        });
+        page.drawText("... e mais " + (projects.length - sliced.length) + " projetos", { x: 60, y: sumY - maxItemsCol * 14 - 10, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5) });
       }
-
-      page.drawText("Gerado em " + new Date().toLocaleString("pt-BR"), {
-        x: 60, y: 30, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5)
-      });
+      page.drawText("Gerado em " + new Date().toLocaleString("pt-BR"), { x: 60, y: 30, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5) });
       if (this._props.userEmail) {
-        page.drawText("Por: " + this._props.userEmail, {
-          x: width - 200, y: 30, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5)
-        });
+        page.drawText("Por: " + this._props.userEmail, { x: width - 200, y: 30, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5) });
       }
     }
 
@@ -425,29 +451,15 @@
       const page = doc.addPage([842, 595]);
       const { width, height } = page.getSize();
 
-      // Header
-      page.drawText("Card SISGPI", {
-        x: 40, y: height - 50, size: 18, font: fontBold, color: rgb(0.04, 0.43, 0.82)
-      });
+      page.drawText("Card SISGPI", { x: 40, y: height - 50, size: 18, font: fontBold, color: rgb(0.04, 0.43, 0.82) });
       const projectLine = project.id + (project.description && project.description !== project.id ? " - " + project.description : "");
-      page.drawText(projectLine, {
-        x: 40, y: height - 75, size: 14, font: fontBold, color: rgb(0.2, 0.2, 0.2)
-      });
+      page.drawText(projectLine, { x: 40, y: height - 75, size: 14, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
       if (versionLabel) {
-        page.drawText("Versão: " + versionLabel, {
-          x: width - 240, y: height - 50, size: 10, font: fontReg, color: rgb(0.4, 0.4, 0.4)
-        });
+        page.drawText("Versão: " + versionLabel, { x: width - 240, y: height - 50, size: 10, font: fontReg, color: rgb(0.4, 0.4, 0.4) });
       }
-      page.drawText("Atualizado em " + new Date().toLocaleString("pt-BR"), {
-        x: width - 240, y: height - 65, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5)
-      });
+      page.drawText("Atualizado em " + new Date().toLocaleString("pt-BR"), { x: width - 240, y: height - 65, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5) });
+      page.drawLine({ start: { x: 40, y: height - 92 }, end: { x: width - 40, y: height - 92 }, thickness: 1, color: rgb(0.85, 0.85, 0.85) });
 
-      page.drawLine({
-        start: { x: 40, y: height - 92 }, end: { x: width - 40, y: height - 92 },
-        thickness: 1, color: rgb(0.85, 0.85, 0.85)
-      });
-
-      // KPIs
       const kpis = this._extractKpis(project.indicators);
       const kpiList = [
         { label: "Score", sub: "em %", value: kpis.score, format: "percent" },
@@ -462,79 +474,46 @@
       for (let i = 0; i < kpiList.length; i++) {
         const kpi = kpiList[i];
         const x = 40 + i * (tileWidth + 10);
-        page.drawText(kpi.label, {
-          x: x + 10, y: kpiTopY - 18, size: 11, font: fontReg, color: rgb(0.3, 0.3, 0.3),
-          maxWidth: tileWidth - 20
-        });
+        page.drawText(kpi.label, { x: x + 10, y: kpiTopY - 18, size: 11, font: fontReg, color: rgb(0.3, 0.3, 0.3), maxWidth: tileWidth - 20 });
         if (kpi.sub) {
-          page.drawText(kpi.sub, {
-            x: x + 10, y: kpiTopY - 34, size: 9, font: fontReg, color: rgb(0.55, 0.55, 0.55)
-          });
+          page.drawText(kpi.sub, { x: x + 10, y: kpiTopY - 34, size: 9, font: fontReg, color: rgb(0.55, 0.55, 0.55) });
         }
-        page.drawText(this._formatValue(kpi.value, kpi.format), {
-          x: x + 10, y: kpiTopY - 65, size: 22, font: fontBold, color: rgb(0.1, 0.1, 0.1)
-        });
+        page.drawText(this._formatValue(kpi.value, kpi.format), { x: x + 10, y: kpiTopY - 65, size: 22, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
       }
 
-      // Tabela de indicadores
       let tableY = kpiTopY - kpiHeight - 30;
-      page.drawText("S00_CAPEX", {
-        x: 40, y: tableY, size: 11, font: fontBold, color: rgb(0.2, 0.2, 0.2)
-      });
+      page.drawText("S00_CAPEX", { x: 40, y: tableY, size: 11, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
       tableY -= 22;
-
-      page.drawRectangle({
-        x: 40, y: tableY - 18, width: width - 80, height: 22, color: rgb(0.95, 0.95, 0.95)
-      });
-      page.drawText("Indicador", {
-        x: 50, y: tableY - 12, size: 10, font: fontBold, color: rgb(0.2, 0.2, 0.2)
-      });
-      page.drawText("Valor", {
-        x: width - 200, y: tableY - 12, size: 10, font: fontBold, color: rgb(0.2, 0.2, 0.2)
-      });
+      page.drawRectangle({ x: 40, y: tableY - 18, width: width - 80, height: 22, color: rgb(0.95, 0.95, 0.95) });
+      page.drawText("Indicador", { x: 50, y: tableY - 12, size: 10, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
+      page.drawText("Valor", { x: width - 200, y: tableY - 12, size: 10, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
       tableY -= 26;
 
       for (let i = 0; i < INDICATOR_ORDER.length; i++) {
         if (tableY < 50) break;
         const spec = INDICATOR_ORDER[i];
         const indent = spec.isGroup ? 0 : 18;
-
         const found = this._findIndicator(project.indicators, spec.label);
         if (i % 2 === 1 && !spec.isGroup) {
-          page.drawRectangle({
-            x: 40, y: tableY - 13, width: width - 80, height: 16, color: rgb(0.985, 0.985, 0.985)
-          });
+          page.drawRectangle({ x: 40, y: tableY - 13, width: width - 80, height: 16, color: rgb(0.985, 0.985, 0.985) });
         }
-        page.drawText(spec.label, {
-          x: 50 + indent, y: tableY - 9, size: 9.5,
-          font: spec.isGroup ? fontBold : fontReg,
-          color: spec.isGroup ? rgb(0.15, 0.15, 0.15) : rgb(0.25, 0.25, 0.25)
-        });
+        page.drawText(spec.label, { x: 50 + indent, y: tableY - 9, size: 9.5, font: spec.isGroup ? fontBold : fontReg, color: spec.isGroup ? rgb(0.15, 0.15, 0.15) : rgb(0.25, 0.25, 0.25) });
         const fmtVal = spec.isGroup ? "" : this._formatValue(found ? found.rawValue : null, spec.format);
         const valWidth = fontReg.widthOfTextAtSize(fmtVal, 9.5);
-        page.drawText(fmtVal, {
-          x: width - 50 - valWidth, y: tableY - 9, size: 9.5,
-          font: fontReg, color: rgb(0.2, 0.2, 0.2)
-        });
+        page.drawText(fmtVal, { x: width - 50 - valWidth, y: tableY - 9, size: 9.5, font: fontReg, color: rgb(0.2, 0.2, 0.2) });
         tableY -= 17;
       }
 
-      // Footer
-      page.drawText("Página " + pageNum + " de " + totalPages, {
-        x: width / 2 - 40, y: 25, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5)
-      });
+      page.drawText("Página " + pageNum + " de " + totalPages, { x: width / 2 - 40, y: 25, size: 9, font: fontReg, color: rgb(0.5, 0.5, 0.5) });
       if (this._props.userEmail) {
-        page.drawText(this._props.userEmail, {
-          x: 40, y: 25, size: 8, font: fontReg, color: rgb(0.55, 0.55, 0.55)
-        });
+        page.drawText(this._props.userEmail, { x: 40, y: 25, size: 8, font: fontReg, color: rgb(0.55, 0.55, 0.55) });
       }
     }
 
     _findIndicator(indicators, label) {
       for (let i = 0; i < indicators.length; i++) {
         const ind = indicators[i];
-        if ((ind.accountDesc && ind.accountDesc === label) ||
-            (ind.accountId && ind.accountId === label)) {
+        if ((ind.accountDesc && ind.accountDesc === label) || (ind.accountId && ind.accountId === label)) {
           return ind;
         }
       }
@@ -558,29 +537,19 @@
       if (value === null || value === undefined || value === "") return "-";
       const num = typeof value === "number" ? value : parseFloat(value);
       if (isNaN(num)) return String(value);
-      const formatted = num.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2, maximumFractionDigits: 2
-      });
+      const formatted = num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       if (format === "percent") return formatted + "%";
       return formatted;
     }
 
-    _setProgress(pct) {
-      this._progress.style.width = pct + "%";
-    }
-
-    _clearLog() {
-      this._status.textContent = "";
-      this._setProgress(0);
-    }
-
+    _setProgress(pct) { this._progress.style.width = pct + "%"; }
+    _clearLog() { this._status.textContent = ""; this._setProgress(0); }
     _log(text) {
       const now = new Date().toLocaleTimeString("pt-BR");
       const line = "[" + now + "] " + text + "\n";
       this._status.textContent = (this._status.textContent + line).slice(-3000);
       this._status.scrollTop = this._status.scrollHeight;
     }
-
     _downloadBlob(bytes, filename) {
       const blob = new Blob([bytes], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
@@ -592,7 +561,6 @@
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
-
     _timestamp() {
       const d = new Date();
       const p = (n) => String(n).padStart(2, "0");
