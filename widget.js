@@ -2,11 +2,10 @@
   "use strict";
 
   // ===========================================================================
-  // SISGPI Book Builder v2.1.0 - SAC Custom Widget com Data Binding
+  // SISGPI Book Builder v2.1.1 - SAC Custom Widget com Data Binding
   // ===========================================================================
-  // Padrão de Data Binding alinhado com exemplos oficiais SAP-samples
-  // (Pie Chart, Gantt, Sunburst): a binding chega via changedProperties no
-  // callback onCustomWidgetAfterUpdate, NÃO via this.dataBindings.
+  // Inspeção profunda: dumpa metadata e data[0] como JSON completo pra
+  // descobrir como measures_N mapeiam pros indicadores (account-based model).
   // ===========================================================================
 
   const PDFLIB_CDN = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
@@ -113,8 +112,73 @@
 
     inspectDataBinding() {
       this._clearLog();
-      this._log("=== INSPEÇÃO v2.1.0 ===");
+      this._log("=== INSPEÇÃO v2.1.1 (JSON profundo) ===");
       this._log("");
+
+      const db = this._dataBinding;
+      if (!db) {
+        this._log("ERRO: Data binding ainda não chegou.");
+        return;
+      }
+
+      this._log("[1] Estado:");
+      this._log("  state: " + (db.state !== undefined ? String(db.state) : "(não definido)"));
+      const data = (db.data && Array.isArray(db.data)) ? db.data : null;
+      this._log("  data.length: " + (data ? String(data.length) : "(sem data)"));
+      this._log("");
+
+      // Dump COMPLETO do metadata como JSON
+      this._log("[2] Metadata (JSON completo):");
+      try {
+        const json = JSON.stringify(db.metadata, this._safeReplacer(), 2);
+        this._log(json || "(metadata é null/undefined)");
+      } catch (e) {
+        this._log("(erro ao serializar metadata: " + e.message + ")");
+        try {
+          this._log("Object.keys(metadata): " + Object.keys(db.metadata || {}).join(", "));
+        } catch (e2) {}
+      }
+      this._log("");
+
+      // Dump COMPLETO de data[0] como JSON
+      if (data && data.length > 0) {
+        this._log("[3] data[0] (JSON completo):");
+        try {
+          const json = JSON.stringify(data[0], this._safeReplacer(), 2);
+          this._log(json || "(data[0] é null/undefined)");
+        } catch (e) {
+          this._log("(erro ao serializar data[0]: " + e.message + ")");
+        }
+        this._log("");
+
+        // Lista de chaves measures_N encontradas
+        try {
+          const keys = Object.keys(data[0]);
+          const measureKeys = keys.filter(k => k.indexOf("measures_") === 0);
+          const dimKeys = keys.filter(k => k.indexOf("dimensions_") === 0);
+          this._log("[4] Resumo da estrutura:");
+          this._log("  Chaves dimensões: " + dimKeys.join(", "));
+          this._log("  Chaves medidas:   " + measureKeys.join(", "));
+        } catch (e) {}
+      }
+    }
+
+    _safeReplacer() {
+      const seen = new WeakSet();
+      return function (key, value) {
+        if (typeof value === "object" && value !== null) {
+          if (seen.has(value)) return "[Circular]";
+          seen.add(value);
+        }
+        if (typeof value === "function") return "[Function]";
+        if (typeof value === "number" && isNaN(value)) return "NaN";
+        return value;
+      };
+    }
+
+    _inspectDataBindingOld() {
+      // (mantido como referência, não usado)
+      this._clearLog();
 
       const db = this._dataBinding;
       if (!db) {
