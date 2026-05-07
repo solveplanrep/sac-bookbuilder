@@ -1,0 +1,87 @@
+{
+  "name": "SISGPI Book Builder",
+  "description": "Gera book em PDF com uma página por projeto a partir do modelo S00_CAPEX",
+  "newInstancePrefix": "BookBuilder",
+  "vendor": "Solveplan",
+  "license": "internal-use",
+  "id": "com.solveplan.sisgpi.bookbuilder",
+  "version": "1.0.0",
+  "icon": "",
+  "eula": "",
+  "webcomponents": [
+    {
+      "kind": "main",
+      "tag": "com-solveplan-sisgpi-bookbuilder",
+      "url": "REPLACE_WITH_YOUR_HOST/widget.js",
+      "integrity": "",
+      "ignoreIntegrity": true
+    }
+  ],
+  "properties": {
+    "headerTitle": {
+      "type": "string",
+      "description": "Título exibido na capa do book",
+      "default": "Card SISGPI - Portfólio de Projetos"
+    },
+    "subtitleTemplate": {
+      "type": "string",
+      "description": "Subtítulo da capa (use {count} para o número de projetos)",
+      "default": "{count} projetos analisados"
+    },
+    "buttonLabel": {
+      "type": "string",
+      "description": "Texto do botão de gerar PDF",
+      "default": "Gerar Book PDF"
+    },
+    "logoUrl": {
+      "type": "string",
+      "description": "URL de uma imagem PNG/JPG para a capa (opcional)",
+      "default": ""
+    },
+    "userEmail": {
+      "type": "string",
+      "description": "Email do usuário gerando o book (mostrado no rodapé)",
+      "default": ""
+    }
+  },
+  "methods": {
+    "addPage": {
+      "description": "Adiciona uma página ao book com dados de um projeto",
+      "parameters": [
+        { "name": "projectCode", "type": "string", "description": "Código do projeto (ex: AMZ.042)" },
+        { "name": "projectName", "type": "string", "description": "Nome do projeto (ex: Microbacias)" },
+        { "name": "kpisJson", "type": "string", "description": "JSON com os 4 KPIs do topo" },
+        { "name": "indicatorsJson", "type": "string", "description": "JSON array com os indicadores da tabela" }
+      ],
+      "returnType": "void"
+    },
+    "generateAndDownload": {
+      "description": "Gera o PDF a partir do buffer e dispara o download",
+      "parameters": [
+        { "name": "versionLabel", "type": "string", "description": "Label da versão (ex: RF3T25_Oficial)" }
+      ],
+      "returnType": "void"
+    },
+    "resetBook": {
+      "description": "Limpa o buffer de páginas",
+      "parameters": [],
+      "returnType": "void"
+    },
+    "getPageCount": {
+      "description": "Retorna o número de páginas no buffer",
+      "parameters": [],
+      "returnType": "integer"
+    }
+  },
+  "events": {
+    "onPageAdded": {
+      "description": "Disparado a cada chamada de addPage com sucesso"
+    },
+    "onBookGenerated": {
+      "description": "Disparado quando o PDF foi gerado e o download foi iniciado"
+    },
+    "onError": {
+      "description": "Disparado em caso de erro de geração ou parse"
+    }
+  }
+}
